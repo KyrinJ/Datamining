@@ -1,0 +1,183 @@
+---
+title: "DataMining"
+author: "KyrinJ"
+date: "2018年12月28日"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+dataproc=function(data){
+  data=within(data,{
+    gender=ifelse(asd$gender=='m',1,0)
+    jundice=ifelse(asd$jundice=='yes',1,0)
+    austim=ifelse(asd$austim=='yes',1,0)
+    appbefore=ifelse(asd$appbefore=='yes',1,0)
+    ASD=ifelse(asd$ASD=='YES',1,0)
+    age=ifelse(asd$age!="?",asd$age,NA)
+  })
+  return(data)
+}
+asd=read.table('D:/Data Mining/ASD.txt',header=T,sep=',')
+head(asd)
+asd=subset(asd,select=-eth)
+asd=subset(asd,select=-country)
+asd=subset(asd,select=-age_desc)
+asd=subset(asd,select=-relation)
+asd=dataproc(asd)
+a=na.omit(asd)
+#maxs=apply(asd,2,max)
+#mins=apply(asd,2,min)
+#a_scale=as.data.frame(scale(asd,center = mins, scale = maxs - mins))
+
+library("sampling")
+n1=round(7/10*sum(a$ASD))
+n2=round(7/10*(nrow(a)-sum(a$ASD)))
+set.seed(70)
+sub_train=strata(a,stratanames=("ASD"),size=c(n1,n2),method="srswor")
+head(sub_train)
+a_train=a[sub_train$ID_unit,]
+a_test=a[-sub_train$ID_unit,]
+dim(a_train); dim(a_test)
+########################      KNN     ###########################
+library("class")
+errRatio<-vector()
+#a=subset(asd,select=-age)
+for(i in 1:30){
+  KnnFit<-knn(train=a[,1:16],test=a[,1:16],cl=a[,17],k=i)
+  CT<-table(a[,17],KnnFit)
+  errRatio<-c(errRatio,(1-sum(diag(CT))/sum(CT))*100)
+}
+#plot(errRatio,type="l",xlab="K",ylab="ErrorRatio(%)",main="",ylim=c(0,80))
+### hold out
+errRatio1<-vector()
+for(i in 1:30){
+  KnnFit<-knn(train=a_train[,1:16],test=a_test[,1:16],cl=a_train[,17],k=i)
+  CT<-table(a_test[,17],KnnFit)
+  errRatio1<-c(errRatio1,(1-sum(diag(CT))/sum(CT))*100)
+}
+#lines(1:30,errRatio1,lty=2,col=2)
+#plot(errRatio1,type="l",xlab="K",ylab="ErrorRatio(%)",main="",ylim=c(0,80))
+### leave one out
+set.seed(12345)
+errRatio2<-vector()
+for(i in 1:30){
+  KnnFit<-knn.cv(train=a[,1:16],cl=a[,17],k=i)
+  CT<-table(a[,17],KnnFit)
+  errRatio2<-c(errRatio2,(1-sum(diag(CT))/sum(CT))*100)
+}
+#plot(errRatio2,type="l",xlab="K",ylab="ErrorRatio(%)",main="",ylim=c(0,80))
+plot(errRatio,type="l",xlab="K",ylab="ErrorRatio(%)",main="",ylim=c(0,20))
+lines(1:30,errRatio1,lty=2,col=2)
+lines(1:30,errRatio2,col=2)
+
+########################   Decision Tree   ###########################
+#library('rpart')
+#library('rpart.plot')
+#Ctl<-rpart.control(minsplit=2,maxcompete=4,xval=10,maxdepth=10,cp=0)
+#set.seed(70)
+#TreeFit1<-rpart(ASD~.,data=a,method="class",parms=list(split="gini"),control=Ctl)
+#TreeFit1
+#rpart.plot(TreeFit1,type=4,branch=0,extra=2)
+#printcp(TreeFit1)
+#plotcp(TreeFit1)
+########################   Random Forest   ###########################
+library('randomForest')
+a$ASD=as.factor(a$ASD)
+set.seed(12345)
+(rFM<-randomForest(ASD~.,data=a,importance=TRUE,ntree=200))
+head(rFM$votes)
+head(rFM$oob.times)
+DrawL<-par()
+#par(mfrow=c(2,1),mar=c(5,5,3,1))
+par(mfrow=c(1,2))
+plot(rFM,main="")
+plot(margin(rFM),type="h",main="",xlab="observed series",ylab="ratio difference")
+par(DrawL)
+Fit<-predict(rFM,a)
+ConfM5<-table(a$ASD,Fit)
+(E5<-(sum(ConfM5)-sum(diag(ConfM5)))/sum(ConfM5))
+head(treesize(rFM))
+head(getTree(rfobj=rFM,k=1,labelVar=TRUE))
+barplot(rFM$importance[,3],main="")
+box()
+importance(rFM,type=1)
+varImpPlot(x=rFM, sort=TRUE, n.var=nrow(rFM$importance),main="")
+
+########################      ANN     ###########################
+library("neuralnet")
+maxs=apply(a,2,max)
+mins=apply(a,2,min)
+scaled=as.data.frame(scale(a,center = mins, scale = maxs - mins))
+set.seed(70)
+BPnet1=neuralnet(ASD~A1+A2+A3+A4+A5+A6+A7+A8+A9+A10+age+gender+jundice+austim+appbefore+score,data=na.omit(asd),hidden=2,err.fct="sse",linear.output=F,algorithm = "rprop+")
+BPnet1$result.matrix
+BPnet1$weights
+plot(BPnet1)
+head(BPnet1$generalized.weights[[1]])
+
+par(mfrow=c(2,4))
+gwplot(BPnet1,selected.covariate="A1")
+gwplot(BPnet1,selected.covariate="A2")
+gwplot(BPnet1,selected.covariate="A3")
+gwplot(BPnet1,selected.covariate="A4")
+gwplot(BPnet1,selected.covariate="A5")
+gwplot(BPnet1,selected.covariate="A6")
+gwplot(BPnet1,selected.covariate="A7")
+gwplot(BPnet1,selected.covariate="A8")
+par(mfrow=c(2,4))
+gwplot(BPnet1,selected.covariate="A9")
+gwplot(BPnet1,selected.covariate="A10")
+gwplot(BPnet1,selected.covariate="age")
+gwplot(BPnet1,selected.covariate="gender")
+gwplot(BPnet1,selected.covariate="jundice")
+gwplot(BPnet1,selected.covariate="austim")
+gwplot(BPnet1,selected.covariate="appbefore")
+gwplot(BPnet1,selected.covariate="score")
+
+library('ROCR')
+detach('package:neuralnet')
+summary(BPnet1$net.result[[1]])
+pred<-prediction(predictions=as.vector(BPnet1$net.result),labels=BPnet1$response)
+par(mfrow=c(2,1))
+perf<-performance(pred,measure="tpr",x.measure="fpr")
+plot(perf,colorize=TRUE,print.cutoffs.at=c(0.2,0.45,0.46,0.47))
+perf<-performance(pred,measure="acc")
+plot(perf)
+Out<-cbind(BPnet1$response,BPnet1$net.result[[1]])
+Out<-cbind(Out,ifelse(Out[,2]>0.999999,1,0)) # 3rd Qu.
+(ConfM.BP<-table(Out[,1],Out[,3]))
+(Err.BP<-(sum(ConfM.BP)-sum(diag(ConfM.BP)))/sum(ConfM.BP))
+
+########################      SVM     ###########################
+library('e1071')
+SvmFit=svm(ASD~.,data=a_train,type="C-classification",kernel='linear',cost=10,sclae=F)
+summary(SvmFit)
+SvmFit$index
+a_train$ASD=as.factor(a_train$ASD)
+a_test$ASD=as.factor(a_test$ASD)
+tobj=tune.svm(ASD~.,data=a_train,type="C-classification",kernel='linear',cost=c(0.001,0.01,0.1,1,5,10,100,1000),sclae=F)
+summary(tobj)
+#SvmFit=svm(ASD~.,data=a,type="C-classification",kernel='linear',cost=0.1,sclae=F)
+#summary(SvmFit)
+BestSvm=tobj$best.model
+summary(BestSvm)
+yPred=predict(BestSvm,a_test)
+(ConfM=table(yPred,a_test$ASD))
+(Err=(sum(ConfM)-sum(diag(ConfM)))/sum(ConfM))
+
+set.seed(70)
+tObj=tune.svm(ASD~.,data=a_train,type="C-classification",kernel='radial',gamma=10^(-6:-3),cost=c(0.001,0.01,0.1,1,5,10,100))
+plot(tObj,xlab=expression(gamma),ylab='C',nlevels=10,color.palette=terrain.colors)
+bestsvm=tObj$best.model
+summary(bestsvm)
+ypred=predict(bestsvm,a_test)
+(ConfM=table(ypred,a_test$ASD))
+(Err=(sum(ConfM)-sum(diag(ConfM)))/sum(ConfM))
+
+
+
+```
